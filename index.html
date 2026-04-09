@@ -675,586 +675,192 @@
 
     <script>
         // ==================== CONFIGURACIÓN FIREBASE ====================
-        // ⚠️ REEMPLAZA ESTA URL CON LA TUYA DE FIREBASE
-        const FIREBASE_URL = https://marketpoints-fquintas-default-rtdb.firebaseio.com/; // ← PEGA TU URL AQUÍ
-        
-        // Inicializar Firebase
-        const app = firebase.initializeApp({
-            databaseURL: FIREBASE_URL
-        });
-        const db = firebase.database();
+        //// ==================== CONFIGURACIÓN FIREBASE ====================
+const FIREBASE_URL = 'https://marketpoints-fquintas-default-rtdb.firebaseio.com/'; // ← TU URL
 
-        // ==================== VARIABLES GLOBALES ====================
-        let courses = [];
-        let currentCourseId = null;
-        let students = {};
-        let benefits = [
-            { id: 1, name: "🚫 Saltar una consigna", desc: "Eliminar una pregunta del examen", cost: 30 },
-            { id: 2, name: "👥 Evaluación en pareja", desc: "Hacer el examen con un compañero", cost: 50 },
-            { id: 3, name: "⏰ Tiempo extra", desc: "10 minutos adicionales", cost: 25 },
-            { id: 4, name: "📝 Pista extra", desc: "Una pista para una pregunta", cost: 15 },
-            { id: 5, name: "🎲 Segunda chance", desc: "Volver a intentar una pregunta", cost: 40 }
-        ];
-        let history = {};
-        let headerConfig = {
-            schoolName: "🏫 Mi Colegio",
-            teacherName: "Profesor",
-            subject: "Asignatura",
-            logo: null
-        };
+// Inicializar Firebase
+const app = firebase.initializeApp({
+    databaseURL: FIREBASE_URL
+});
+const db = firebase.database();
 
-        // ==================== SINCRONIZACIÓN CON FIREBASE ====================
-        
-        function updateSyncStatus(status) {
-            const el = document.getElementById('syncStatus');
-            el.className = 'sync-status ' + status;
-            if (status === 'online') el.textContent = '✅ Sincronizado';
-            else if (status === 'syncing') el.textContent = '🔄 Sincronizando...';
-            else if (status === 'offline') el.textContent = '⚠️ Sin conexión';
-        }
+// ==================== CACHÉ LOCAL + SINCRONIZACIÓN ====================
 
-        // Cargar datos desde Firebase
-        function loadFromFirebase() {
-            updateSyncStatus('syncing');
+// Variables globales
+let courses = [];
+let currentCourseId = null;
+let students = {};
+let benefits = [
+    { id: 1, name: "🚫 Saltar una consigna", desc: "Eliminar una pregunta del examen", cost: 30 },
+    { id: 2, name: "👥 Evaluación en pareja", desc: "Hacer el examen con un compañero", cost: 50 },
+    { id: 3, name: "⏰ Tiempo extra", desc: "10 minutos adicionales", cost: 25 },
+    { id: 4, name: "📝 Pista extra", desc: "Una pista para una pregunta", cost: 15 },
+    { id: 5, name: "🎲 Segunda chance", desc: "Volver a intentar una pregunta", cost: 40 }
+];
+let history = {};
+let headerConfig = {
+    schoolName: "🏫 Mi Colegio",
+    teacherName: "Profesor",
+    subject: "Asignatura",
+    logo: null
+};
+
+// Cargar desde localStorage primero (instantáneo)
+function loadFromCache() {
+    const cached = localStorage.getItem('mp_cache');
+    if (cached) {
+        try {
+            const data = JSON.parse(cached);
+            courses = data.courses || [];
+            students = data.students || {};
+            history = data.history || {};
+            benefits = data.benefits || benefits;
+            headerConfig = data.headerConfig || headerConfig;
+            currentCourseId = data.currentCourseId || null;
             
-            // Cargar cursos
-            db.ref('courses').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    courses = Object.entries(data).map(([id, course]) => ({...course, id}));
-                } else {
-                    courses = [];
-                }
-                renderCourses();
-                if (currentCourseId) renderStudents();
-            });
-
-            // Cargar estudiantes
-            db.ref('students').on('value', (snapshot) => {
-                students = snapshot.val() || {};
-                if (currentCourseId) {
-                    renderStudents();
-                    renderLeaderboard();
-                    updateSelects();
-                }
-                updateSyncStatus('online');
-            });
-
-            // Cargar historial
-            db.ref('history').on('value', (snapshot) => {
-                history = snapshot.val() || {};
-                if (currentCourseId) renderHistory();
-            });
-
-            // Cargar beneficios
-            db.ref('benefits').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) benefits = Object.values(data);
-                renderBenefits();
-            });
-
-            // Cargar configuración
-            db.ref('config').on('value', (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    headerConfig = data;
-                    loadHeader();
-                }
-            });
-        }
-
-        // Guardar en Firebase
-        function saveToFirebase() {
-            updateSyncStatus('syncing');
-            
-            const coursesObj = {};
-            courses.forEach(c => coursesObj[c.id] = c);
-            
-            db.ref('courses').set(coursesObj);
-            db.ref('students').set(students);
-            db.ref('history').set(history);
-            db.ref('benefits').set(benefits);
-            db.ref('config').set(headerConfig);
-            
-            setTimeout(() => updateSyncStatus('online'), 500);
-        }
-
-        // ==================== FUNCIONES DE UI ====================
-
-        function loadHeader() {
-            document.getElementById('schoolNameDisplay').textContent = headerConfig.schoolName;
-            document.getElementById('teacherInfoDisplay').textContent = `👨‍🏫 ${headerConfig.teacherName} - ${headerConfig.subject}`;
-            
-            if (headerConfig.logo) {
-                document.getElementById('schoolLogoImg').src = headerConfig.logo;
-                document.getElementById('schoolLogoImg').classList.remove('hidden');
-            } else {
-                document.getElementById('schoolLogoImg').classList.add('hidden');
-            }
-        }
-
-        function openHeaderModal() {
-            document.getElementById('editSchoolName').value = headerConfig.schoolName.replace('🏫 ', '');
-            document.getElementById('editTeacherName').value = headerConfig.teacherName;
-            document.getElementById('editSubject').value = headerConfig.subject;
-            document.getElementById('headerModal').style.display = 'flex';
-        }
-
-        function closeHeaderModal() {
-            document.getElementById('headerModal').style.display = 'none';
-        }
-
-        function previewLogo() {
-            const file = document.getElementById('editLogo').files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    document.getElementById('logoPreview').innerHTML = `<img src="${e.target.result}" style="max-width:100%;max-height:100%;">`;
-                };
-                reader.readAsDataURL(file);
-            }
-        }
-
-        function saveHeader() {
-            headerConfig.schoolName = '🏫 ' + (document.getElementById('editSchoolName').value || 'Mi Colegio');
-            headerConfig.teacherName = document.getElementById('editTeacherName').value || 'Profesor';
-            headerConfig.subject = document.getElementById('editSubject').value || 'Asignatura';
-            
-            const file = document.getElementById('editLogo').files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    headerConfig.logo = e.target.result;
-                    finishSaveHeader();
-                };
-                reader.readAsDataURL(file);
-            } else {
-                finishSaveHeader();
-            }
-        }
-
-        function finishSaveHeader() {
-            saveToFirebase();
+            // Mostrar datos inmediatamente
             loadHeader();
-            closeHeaderModal();
-            showToast('✅ Configuración guardada');
-        }
-
-        function renderCourses() {
-            const container = document.getElementById('courseTabs');
-            
-            if (courses.length === 0) {
-                container.innerHTML = '<p style="color: #999; width: 100%; text-align: center;">No hay cursos. Agrega uno arriba.</p>';
-                return;
-            }
-            
-            container.innerHTML = courses.map(course => `
-                <div class="course-tab ${course.id == currentCourseId ? 'active' : ''}" onclick="selectCourse('${course.id}')">
-                    ${course.name}
-                    <span class="delete-course" onclick="event.stopPropagation(); deleteCourse('${course.id}')">×</span>
-                </div>
-            `).join('');
-        }
-
-        function addCourse() {
-            const name = document.getElementById('newCourseName').value.trim();
-            if (!name) {
-                showToast('❌ Ingresa un nombre de curso');
-                return;
-            }
-            
-            const course = {
-                id: Date.now().toString(),
-                name: name
-            };
-            
-            courses.push(course);
-            students[course.id] = [];
-            history[course.id] = [];
-            saveToFirebase();
-            
-            document.getElementById('newCourseName').value = '';
-            selectCourse(course.id);
-            showToast(`✅ Curso ${name} creado`);
-        }
-
-        function selectCourse(courseId) {
-            currentCourseId = courseId;
-            const course = courses.find(c => c.id === courseId);
-            
-            document.querySelectorAll('.current-course').forEach(el => el.textContent = course.name);
-            document.getElementById('currentCourseName').textContent = course.name;
-            
-            document.getElementById('mainContent').classList.remove('hidden');
-            document.getElementById('noCourseMessage').classList.add('hidden');
-            
             renderCourses();
+            if (currentCourseId) {
+                selectCourse(currentCourseId);
+            }
+            updateSyncStatus('online', '✅ Datos locales cargados');
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+    return false;
+}
+
+// Guardar en caché local
+function saveToCache() {
+    const data = {
+        courses, students, history, benefits, headerConfig, 
+        currentCourseId, timestamp: Date.now()
+    };
+    localStorage.setItem('mp_cache', JSON.stringify(data));
+}
+
+// Cargar desde Firebase (en segundo plano)
+function loadFromFirebase() {
+    updateSyncStatus('syncing', '🔄 Conectando...');
+    
+    let loadedCount = 0;
+    const totalLoads = 5;
+    
+    function checkAllLoaded() {
+        loadedCount++;
+        if (loadedCount >= totalLoads) {
+            updateSyncStatus('online', '✅ Sincronizado');
+            saveToCache(); // Guardar copia local
+        }
+    }
+    
+    // Cursos
+    db.ref('courses').on('value', (snapshot) => {
+        const data = snapshot.val();
+        courses = data ? Object.entries(data).map(([id, c]) => ({...c, id})) : [];
+        renderCourses();
+        if (currentCourseId) renderStudents();
+        checkAllLoaded();
+    }, (error) => {
+        updateSyncStatus('offline', '⚠️ Usando datos locales');
+    });
+    
+    // Estudiantes
+    db.ref('students').on('value', (snapshot) => {
+        students = snapshot.val() || {};
+        if (currentCourseId) {
             renderStudents();
             renderLeaderboard();
-            renderHistory();
             updateSelects();
         }
-
-        function deleteCourse(courseId) {
-            const course = courses.find(c => c.id === courseId);
-            if (!confirm(`¿Eliminar el curso ${course.name}?`)) return;
-            
-            courses = courses.filter(c => c.id !== courseId);
-            delete students[courseId];
-            delete history[courseId];
-            
-            if (currentCourseId === courseId) {
-                currentCourseId = null;
-                document.getElementById('mainContent').classList.add('hidden');
-                document.getElementById('noCourseMessage').classList.remove('hidden');
-            }
-            
-            saveToFirebase();
-            renderCourses();
-            showToast(`🗑️ Curso eliminado`);
+        checkAllLoaded();
+    });
+    
+    // Historial
+    db.ref('history').on('value', (snapshot) => {
+        history = snapshot.val() || {};
+        if (currentCourseId) renderHistory();
+        checkAllLoaded();
+    });
+    
+    // Beneficios
+    db.ref('benefits').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) benefits = Object.values(data);
+        renderBenefits();
+        checkAllLoaded();
+    });
+    
+    // Configuración
+    db.ref('config').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            headerConfig = data;
+            loadHeader();
         }
+        checkAllLoaded();
+    });
+}
 
-        function showTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
-            document.getElementById(tabName).classList.remove('hidden');
-            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
-            event.target.classList.add('active');
-            
-            if (tabName === 'students') {
-                renderStudents();
-                renderLeaderboard();
-            }
-        }
+// Guardar en Firebase (optimizado)
+let saveTimeout;
+function saveToFirebase() {
+    updateSyncStatus('syncing', '🔄 Guardando...');
+    clearTimeout(saveTimeout);
+    
+    // Debounce: esperar 500ms antes de guardar para no saturar
+    saveTimeout = setTimeout(() => {
+        const coursesObj = {};
+        courses.forEach(c => coursesObj[c.id] = c);
+        
+        // Guardar todo en paralelo
+        Promise.all([
+            db.ref('courses').set(coursesObj),
+            db.ref('students').set(students),
+            db.ref('history').set(history),
+            db.ref('benefits').set(benefits),
+            db.ref('config').set(headerConfig)
+        ]).then(() => {
+            updateSyncStatus('online', '✅ Guardado');
+            saveToCache(); // Actualizar caché
+        }).catch((error) => {
+            updateSyncStatus('offline', '⚠️ Error al guardar');
+            saveToCache(); // Al menos guardar localmente
+        });
+    }, 500);
+}
 
-        function getCurrentStudents() {
-            return students[currentCourseId] || [];
-        }
+function updateSyncStatus(status, text) {
+    const el = document.getElementById('syncStatus');
+    el.className = 'sync-status ' + status;
+    el.textContent = text;
+    
+    // Auto-ocultar después de 3 segundos si está online
+    if (status === 'online') {
+        setTimeout(() => {
+            el.style.opacity = '0.5';
+        }, 3000);
+    } else {
+        el.style.opacity = '1';
+    }
+}
 
-        function addStudent() {
-            const name = document.getElementById('newStudentName').value.trim();
-            if (!name) {
-                showToast('❌ Ingresa un nombre válido');
-                return;
-            }
-            
-            const student = {
-                id: Date.now(),
-                name: name,
-                points: 0,
-                history: []
-            };
-            
-            if (!students[currentCourseId]) {
-                students[currentCourseId] = [];
-            }
-            students[currentCourseId].push(student);
-            saveToFirebase();
-            
-            document.getElementById('newStudentName').value = '';
-            renderStudents();
-            updateSelects();
-            renderLeaderboard();
-            showToast(`✅ ${name} agregado`);
-        }
+// ==================== INICIALIZACIÓN RÁPIDA ====================
 
-        function deleteStudent(id) {
-            const courseStudents = getCurrentStudents();
-            const student = courseStudents.find(s => s.id === id);
-            if (!student) return;
-            
-            if (!confirm(`¿Eliminar a ${student.name}?`)) return;
-            
-            students[currentCourseId] = courseStudents.filter(s => s.id !== id);
-            saveToFirebase();
-            renderStudents();
-            updateSelects();
-            renderLeaderboard();
-            showToast(`🗑️ ${student.name} eliminado`);
-        }
-
-        function renderStudents() {
-            const container = document.getElementById('studentsList');
-            const courseStudents = getCurrentStudents();
-            
-            if (courseStudents.length === 0) {
-                container.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;"><div style="font-size:4em;">👻</div><p>No hay alumnos en este curso</p></div>`;
-                return;
-            }
-            
-            container.innerHTML = courseStudents.map(student => {
-                const badge = getBadge(student.points);
-                return `
-                    <div class="student-card">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div class="student-name" style="flex:1;">
-                                ${student.name}
-                                ${badge ? `<span class="badge badge-${badge.type}">${badge.icon}</span>` : ''}
-                            </div>
-                            <button onclick="deleteStudent(${student.id})" style="background:#ff4757; color:white; border:none; border-radius:50%; width:30px; height:30px; cursor:pointer;">🗑️</button>
-                        </div>
-                        <div class="wallet">
-                            <div class="wallet-amount">${student.points}</div>
-                            <div class="wallet-label">puntos</div>
-                        </div>
-                        <div class="actions">
-                            <button class="btn btn-success" onclick="quickAddPoints(${student.id}, 5)" style="flex:1; padding:8px; font-size:14px;">+5</button>
-                            <button class="btn btn-success" onclick="quickAddPoints(${student.id}, 10)" style="flex:1; padding:8px; font-size:14px;">+10</button>
-                            <button class="btn btn-danger" onclick="quickAddPoints(${student.id}, -5)" style="flex:1; padding:8px; font-size:14px;">-5</button>
-                        </div>
-                        <div class="history-list">
-                            ${student.history.slice(-3).map(h => `
-                                <div class="history-item ${h.points > 0 ? 'positive' : 'negative'}">
-                                    <span>${h.concept}</span>
-                                    <strong>${h.points > 0 ? '+' : ''}${h.points}</strong>
-                                </div>
-                            `).join('') || '<div style="color:#999;font-size:0.9em;">Sin movimientos</div>'}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function getBadge(points) {
-            if (points >= 100) return { type: 'gold', icon: '🥇' };
-            if (points >= 50) return { type: 'silver', icon: '🥈' };
-            if (points >= 25) return { type: 'bronze', icon: '🥉' };
-            return null;
-        }
-
-        function renderLeaderboard() {
-            const container = document.getElementById('leaderboard');
-            const courseStudents = [...getCurrentStudents()].sort((a, b) => b.points - a.points).slice(0, 5);
-            
-            if (courseStudents.length === 0) {
-                container.innerHTML = '<p style="text-align:center;">No hay datos aún</p>';
-                return;
-            }
-            
-            const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-            container.innerHTML = courseStudents.map((s, i) => `
-                <div class="leaderboard-item">
-                    <div class="leaderboard-rank">${medals[i] || (i+1)}</div>
-                    <div class="leaderboard-name">${s.name}</div>
-                    <div class="leaderboard-points">${s.points} pts</div>
-                </div>
-            `).join('');
-        }
-
-        function updateSelects() {
-            const courseStudents = getCurrentStudents();
-            
-            ['pointStudent', 'redeemStudent'].forEach(id => {
-                const select = document.getElementById(id);
-                const currentValue = select.value;
-                select.innerHTML = '<option value="">-- Seleccionar --</option>' + 
-                    courseStudents.map(s => `<option value="${s.id}">${s.name} (${s.points} pts)</option>`).join('');
-                select.value = currentValue;
-            });
-            
-            updateBenefitSelect();
-        }
-
-        function updateBenefitSelect() {
-            const select = document.getElementById('redeemBenefit');
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">-- Seleccionar --</option>' + 
-                benefits.map(b => `<option value="${b.id}">${b.name} (${b.cost} pts)</option>`).join('');
-            select.value = currentValue;
-        }
-
-        function givePoints() {
-            const studentId = document.getElementById('pointStudent').value;
-            const concept = document.getElementById('pointConcept').value.trim();
-            const amount = parseInt(document.getElementById('pointAmount').value);
-            
-            if (!studentId || !concept) {
-                showToast('❌ Completa todos los campos');
-                return;
-            }
-            
-            addPoints(parseInt(studentId), amount, concept);
-            document.getElementById('pointConcept').value = '';
-            document.getElementById('pointAmount').value = '10';
-            showToast(`✅ +${amount} puntos otorgados`);
-        }
-
-        function quickAddPoints(studentId, amount) {
-            const concept = amount > 0 ? 'Bonificación rápida' : 'Descuento';
-            addPoints(studentId, amount, concept);
-            showToast(`${amount > 0 ? '+' : ''}${amount} puntos`);
-        }
-
-        function addPoints(studentId, amount, concept) {
-            const courseStudents = getCurrentStudents();
-            const student = courseStudents.find(s => s.id === studentId);
-            if (!student) return;
-            
-            student.points += amount;
-            const transaction = {
-                date: new Date().toLocaleString('es-ES'),
-                concept: concept,
-                points: amount
-            };
-            student.history.push(transaction);
-            
-            if (!history[currentCourseId]) history[currentCourseId] = [];
-            history[currentCourseId].unshift({...transaction, studentName: student.name});
-            
-            saveToFirebase();
-        }
-
-        function quickActivity(concept, points) {
-            const studentId = document.getElementById('pointStudent').value;
-            if (!studentId) {
-                showToast('❌ Selecciona un alumno primero');
-                return;
-            }
-            addPoints(parseInt(studentId), points, concept);
-            showToast(`✅ ${concept}: +${points} puntos`);
-        }
-
-        function addPointsToAll(amount) {
-            const courseStudents = getCurrentStudents();
-            courseStudents.forEach(s => {
-                s.points += amount;
-                const transaction = {
-                    date: new Date().toLocaleString('es-ES'),
-                    concept: 'Bonificación grupal',
-                    points: amount
-                };
-                s.history.push(transaction);
-                history[currentCourseId].unshift({...transaction, studentName: s.name});
-            });
-            saveToFirebase();
-            showToast(`✅ +${amount} puntos a todos`);
-        }
-
-        function resetAllPoints() {
-            if (!confirm('¿Resetear TODOS los puntos de este curso?')) return;
-            
-            const courseStudents = getCurrentStudents();
-            courseStudents.forEach(s => {
-                s.points = 0;
-                s.history = [];
-            });
-            history[currentCourseId] = [];
-            saveToFirebase();
-            showToast('🔄 Curso reseteado');
-        }
-
-        function renderBenefits() {
-            const container = document.getElementById('benefitsList');
-            container.innerHTML = benefits.map(b => `
-                <div class="benefit-card">
-                    <div>
-                        <h3 style="margin-bottom:5px;">${b.name}</h3>
-                        <p style="color:#666; font-size:0.9em;">${b.desc}</p>
-                    </div>
-                    <div>
-                        <span class="benefit-cost">${b.cost} pts</span>
-                        <button class="btn btn-danger" style="margin-left:10px; padding:5px 10px; font-size:12px;" onclick="deleteBenefit(${b.id})">🗑️</button>
-                    </div>
-                </div>
-            `).join('');
-            updateBenefitSelect();
-        }
-
-        function addBenefit() {
-            const name = document.getElementById('benefitName').value.trim();
-            const desc = document.getElementById('benefitDesc').value.trim();
-            const cost = parseInt(document.getElementById('benefitCost').value);
-            
-            if (!name || !desc) {
-                showToast('❌ Completa todos los campos');
-                return;
-            }
-            
-            benefits.push({
-                id: Date.now(),
-                name: name,
-                desc: desc,
-                cost: cost
-            });
-            
-            saveToFirebase();
-            document.getElementById('benefitName').value = '';
-            document.getElementById('benefitDesc').value = '';
-            document.getElementById('benefitCost').value = '50';
-            showToast('✅ Beneficio agregado');
-        }
-
-        function deleteBenefit(id) {
-            if (!confirm('¿Eliminar este beneficio?')) return;
-            benefits = benefits.filter(b => b.id !== id);
-            saveToFirebase();
-        }
-
-        function redeemBenefit() {
-            const studentId = parseInt(document.getElementById('redeemStudent').value);
-            const benefitId = parseInt(document.getElementById('redeemBenefit').value);
-            
-            if (!studentId || !benefitId) {
-                showToast('❌ Selecciona alumno y beneficio');
-                return;
-            }
-            
-            const courseStudents = getCurrentStudents();
-            const student = courseStudents.find(s => s.id === studentId);
-            const benefit = benefits.find(b => b.id === benefitId);
-            
-            if (student.points < benefit.cost) {
-                showToast(`❌ ${student.name} necesita ${benefit.cost} puntos`);
-                return;
-            }
-            
-            student.points -= benefit.cost;
-            const transaction = {
-                date: new Date().toLocaleString('es-ES'),
-                concept: `Canje: ${benefit.name}`,
-                points: -benefit.cost
-            };
-            student.history.push(transaction);
-            history[currentCourseId].unshift({...transaction, studentName: student.name});
-            
-            saveToFirebase();
-            showToast(`🎉 ¡${student.name} canjeó ${benefit.name}!`);
-        }
-
-        function renderHistory() {
-            const container = document.getElementById('fullHistory');
-            const courseHistory = history[currentCourseId] || [];
-            
-            if (courseHistory.length === 0) {
-                container.innerHTML = `<div class="empty-state"><div style="font-size:4em;">📭</div><p>Sin movimientos en este curso</p></div>`;
-                return;
-            }
-            
-            container.innerHTML = courseHistory.map(h => `
-                <div class="history-item ${h.points > 0 ? 'positive' : 'negative'}" style="padding:15px; border-bottom:1px solid #eee;">
-                    <div>
-                        <strong>${h.studentName}</strong>
-                        <div style="font-size:0.9em; color:#666;">${h.concept}</div>
-                        <div style="font-size:0.8em; color:#999;">${h.date}</div>
-                    </div>
-                    <div style="font-size:1.2em; font-weight:bold;">${h.points > 0 ? '+' : ''}${h.points}</div>
-                </div>
-            `).join('');
-        }
-
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 3000);
-        }
-
-        window.onclick = function(event) {
-            const modal = document.getElementById('headerModal');
-            if (event.target === modal) closeHeaderModal();
-        }
-
-        // Iniciar
+document.addEventListener('DOMContentLoaded', function() {
+    // 1. Cargar desde caché local (instantáneo)
+    const hasCache = loadFromCache();
+    
+    // 2. Luego sincronizar con Firebase (segundo plano)
+    setTimeout(() => {
         loadFromFirebase();
+    }, hasCache ? 100 : 0); // Si hay caché, esperar menos
+});
     </script>
+</body>
+</html>
 </body>
 </html>
